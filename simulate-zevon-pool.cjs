@@ -107,13 +107,32 @@ async function main() {
   console.log('Simulation slot:', simulation.context.slot);
   console.log('Compute units:', simulation.value.unitsConsumed);
   console.log('Transaction bytes:', bytes);
-  console.log('Pool/mint/metadata/vault/ATA account rent:',
-    accounts.slice(1).reduce((sum, account) => sum + account.lamports, 0) / 1e9, 'SOL');
+  const quoteTokens = spl.unpackAccount(quoteVault, asInfo(accounts[6]), spl.TOKEN_PROGRAM_ID);
+  assert.equal(quoteTokens.amount.toString(), '1000000000', 'Unexpected SOL held in quote vault');
+  // Wrapped SOL in the vault is the buy deposit, not rent.
+  const poolRent = accounts.slice(1).reduce((sum, account) => sum + account.lamports, 0)
+    - Number(quoteTokens.amount);
+  console.log('Pool/mint/metadata/vault/ATA account rent:', poolRent / 1e9, 'SOL');
   console.log('Simulated wallet decrease:', (before - accounts[0].lamports) / 1e9, 'SOL (balance reads may differ by slot)');
   const fee = await connection.getFeeForMessage(message, 'confirmed');
   console.log('Estimated pool/buy network fee:', fee.value === null ? 'Unavailable' : fee.value / 1e9 + ' SOL');
   console.log('No transaction signed or submitted. Temporary mint address discarded.');
   console.log('Final launch must use your new ZEVON config, not the reference config used here.');
+  const configRent = await connection.getMinimumBalanceForRentExemption(1048, 'confirmed');
+  // Previous config simulation used two signatures, with an estimated fee of 10,000 lamports.
+  // Keep this estimate separate from the actual fee returned for this pool/buy message.
+  if (fee.value !== null) {
+    const total = 1000000000 + poolRent + configRent + 10000 + fee.value;
+    console.log('--- REHEARSAL SUMMARY ---');
+    console.log('PASS | 1 SOL buy receives', decimal(tokenAccount.amount, 6), 'ZEVON');
+    console.log('PASS | 1 billion supply, 6 decimals, immutable metadata');
+    console.log('Compute units:', simulation.value.unitsConsumed, '| Transaction bytes:', bytes);
+    console.log('Pool setup rent:', poolRent / 1e9, 'SOL | Config rent:', configRent / 1e9, 'SOL');
+    console.log('Estimated total including 1 SOL buy and both fees:', total / 1e9, 'SOL');
+    console.log('Estimated remaining wallet balance:', (before - total) / 1e9, 'SOL');
+    console.log('Mint authority:', mint.mintAuthority?.toBase58() || 'None', '| Freeze authority:', mint.freezeAuthority?.toBase58() || 'None');
+    console.log('SIMULATION ONLY. No signing or spending. Uses reference config.');
+  }
 }
 
 main().catch(error => {
