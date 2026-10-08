@@ -38,7 +38,8 @@ async function main() {
     createPoolParam: { config, baseMint, name: 'ZEVON', symbol: 'ZEVON',
       uri: URI, poolCreator: wallet, payer: wallet },
     firstBuyParam: { buyer: wallet, receiver: wallet,
-      buyAmount: new BN('1000000000'), minimumAmountOut: quote.outputAmount },
+      buyAmount: new BN('1000000000'), minimumAmountOut: quote.outputAmount,
+      referralTokenAccount: null },
   });
   // Extra compute is a rehearsal ceiling, not a chosen live transaction setting.
   tx.instructions.unshift(web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 1400000 }));
