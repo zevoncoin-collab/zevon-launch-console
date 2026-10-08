@@ -1,0 +1,47 @@
+{
+  "project": "ZEVON",
+  "symbol": "ZEVON",
+  "network": "solana-mainnet-beta",
+  "status": "PREPARED_UNVERIFIED_NOT_DEPLOYED",
+  "walletPublicKey": "47jKwD5fkDcspPFoiRWN5SUrLjA3zw2THZV95Qu48Pto",
+  "sdk": "@meteora-ag/dynamic-bonding-curve-sdk@1.5.13",
+  "dbcProgram": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+  "quoteMint": "So11111111111111111111111111111111111111112",
+  "tokenDecimals": 6,
+  "fixedSupplyTokens": "1000000000",
+  "initialBuyLamports": "1000000000",
+  "migrationOption": 1,
+  "migratedPoolFeeBps": 300,
+  "sqrtStartPrice": "101036980417872351",
+  "migrationSqrtPrice": "291668633435675805",
+  "swapBaseAmount": "742715710833900",
+  "migrationQuoteThreshold": "64321068611",
+  "migrationBaseThreshold": "257284278231765",
+  "curve": [
+    {
+      "sqrtPrice": "291668633435675805",
+      "liquidity": "114814749404659784445079784059765"
+    },
+    {
+      "sqrtPrice": "79226673521066979257578248091",
+      "liquidity": "3189202546989621076726725"
+    }
+  ],
+  "curveRemainingPoints": "indices 2-19 all zero",
+  "creatorTradingFeePercentage": 50,
+  "creatorPermanentLockedLiquidityPercentage": 50,
+  "partnerPermanentLockedLiquidityPercentage": 50,
+  "creatorLiquidityPercentage": 0,
+  "partnerLiquidityPercentage": 0,
+  "metadataUri": "ipfs://bafkreifgqh2x744e7hcp5e3qnt6kyyy5agrac3teryahrykmtck7nxng7a",
+  "requiresVerification": [
+    "Verify image and metadata bytes served by both IPFS CIDs",
+    "Validate all 43 PoolConfig fields against the source config on-chain, including full poolFees and vesting settings",
+    "Confirm exact two curve point integers and their SDK mapping",
+    "Simulate config creation and pool creation with 1 SOL first buy using current Meteora SDK",
+    "Review estimated SOL fees and rent; explicitly approve signatures in Phantom"
+  ],
+  "initialBuySol": "1",
+  "feeClaimer": "47jKwD5fkDcspPFoiRWN5SUrLjA3zw2THZV95Qu48Pto",
+  "leftoverReceiver": "47jKwD5fkDcspPFoiRWN5SUrLjA3zw2THZV95Qu48Pto"
+}

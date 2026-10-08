@@ -1,0 +1,15 @@
+{
+  "name": "ZEVON",
+  "symbol": "ZEVON",
+  "description": "Autonomous Intelligence, Evolved. ZEVON is a community-driven Solana token exploring a future ecosystem of autonomous AI agents interacting and operating on-chain. This describes the project's vision, not currently deployed AI-agent functionality.",
+  "image": "ipfs://bafybeigrf3izrcoynvaueylomb4bvt64x2urhkzzybpasn2hpbwvddw4v4",
+  "properties": {
+    "category": "image",
+    "files": [
+      {
+        "uri": "ipfs://bafybeigrf3izrcoynvaueylomb4bvt64x2urhkzzybpasn2hpbwvddw4v4",
+        "type": "image/png"
+      }
+    ]
+  }
+}
