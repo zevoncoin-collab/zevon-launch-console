@@ -16,3 +16,11 @@ This is a **working mobile-friendly pre-launch verification website**, not a fun
 
 Official Meteora SDK: https://github.com/MeteoraAg/dynamic-bonding-curve-sdk
 Official DBC developer docs: https://docs.meteora.ag/developer-guides/dbc
+
+## Integration update: read-only on-chain inspection
+
+This update adds `inspection.js`, a browser-based, read-only `getAccountInfo` check of the AUTON DBC PoolConfig on Solana mainnet. It validates the owner and expected 1048-byte length, computes a SHA-256 digest, and lets you download the raw base64 account snapshot for subsequent SDK decoding. Some public RPC servers block browser CORS; enter a trusted HTTPS RPC endpoint if needed. Never paste API secrets into a public repository.
+
+**This is not a transaction builder.** The live launch button is deliberately disabled. To implement deployment, decode and compare every config field with the official SDK, verify exact fees/curve/vesting and fee recipient semantics, build `createConfig` and `createPoolWithFirstBuy`, simulate both, and obtain explicit Phantom approvals. Do not copy this source account as the ZEVON configuration without replacing wallet recipients.
+
+To update GitHub Pages on iPhone: extract this ZIP, upload the files from the extracted folder to the **root** of your existing `zevon-launch-console` repository, overwrite matching files and commit to `main`. Wait for GitHub Pages to rebuild, then reopen in Phantom.
