@@ -17,7 +17,7 @@ const decimal = (value, places) => {
   return digits.slice(0, -places) + '.' + digits.slice(-places);
 };
 
-function main() {
+function buildPlan() {
   const raw = fs.readFileSync('auton-config.bin');
   assert.equal(raw.length, 1048, 'Unexpected snapshot size');
   assert.equal(crypto.createHash('sha256').update(raw).digest('hex'), SNAPSHOT_HASH,
@@ -96,6 +96,11 @@ function main() {
   assert.deepEqual(Object.keys(p).sort(), schema.type.fields.map(f => camel(f.name)).sort(),
     'Config mapper must cover every SDK input field');
   sdk.validateConfigParameters({ ...p, leftoverReceiver: new PublicKey(WALLET) });
+  return { params: p, reference: c, connection, program, BN, wallet: new PublicKey(WALLET) };
+}
+
+function main() {
+  const { reference: c, connection, BN } = buildPlan();
   console.log('PASS: all config input fields mapped; Meteora SDK validation passed');
   const quote = new sdk.PoolService(connection, 'confirmed').getQuoteFromInputAmount({
     config: c, swapBaseForQuote: false, amountIn: new BN('1000000000'),
@@ -118,7 +123,10 @@ function main() {
   console.log('Quote excludes account rent and network fees; live transaction minimum output is not set here.');
 }
 
-try { main(); } catch (error) {
-  console.error('ZEVON plan check failed:', error.message);
-  process.exitCode = 1;
+module.exports = { buildPlan };
+if (!module.parent) {
+  try { main(); } catch (error) {
+    console.error('ZEVON plan check failed:', error.message);
+    process.exitCode = 1;
+  }
 }
