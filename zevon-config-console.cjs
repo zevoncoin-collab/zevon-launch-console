@@ -7,7 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 
-function createConsole({ plan, enabled, renderPreview, prepare, verify, browserJS, logoPath }) {
+function createConsole({ plan, enabled, renderPreview, prepare, submit, verify, browserJS, logoPath }) {
   const token = crypto.randomBytes(24).toString('hex');
   const nonce = crypto.randomBytes(18).toString('base64');
   let busy = false;
@@ -28,7 +28,11 @@ document.getElementById('createConfig').addEventListener('click',async()=>{
   const bytes=Uint8Array.from(atob(prepared.transaction),c=>c.charCodeAt(0));const transaction=solanaWeb3.VersionedTransaction.deserialize(bytes);
   if(transaction.message.staticAccountKeys[0].toString()!==plan.wallet)throw Error('Unexpected transaction payer.');
   output.textContent='Review the config-creation transaction in Phantom.';
-  const sent=await provider.signAndSendTransaction(transaction);
+  const signed=await provider.signTransaction(transaction);
+  if(!signed||!signed.message||!signed.serialize)throw Error('Phantom did not return a signed transaction.');
+  const signedBytes=signed.serialize();let binary='';for(const byte of signedBytes)binary+=String.fromCharCode(byte);
+  output.textContent='Phantom approved. Validating signatures and simulating before submission. Do not repeat.';
+  const sent=await api('/submit-config',{transaction:btoa(binary)});
   localStorage.setItem('zevon-config-signature-'+plan.draft.config,sent.signature);
   output.textContent='Submitted: '+sent.signature+'. Waiting for on-chain verification. Do not repeat the transaction.';
   const result=await api('/verify-config',{signature:sent.signature});output.textContent='PASS: config confirmed and all 43 fields verified. Signature: '+result.signature+'. Stop here; pool creation requires a separate approval.';
@@ -52,7 +56,7 @@ document.getElementById('createConfig').addEventListener('click',async()=>{
     if (req.method !== 'POST') { reply(res, 405, { error: 'Method not allowed' }); return; }
     if (!enabled) { reply(res, 403, { error: 'Signing is disabled' }); return; }
     if (req.headers['x-zevon-token'] !== token) { reply(res, 403, { error: 'Invalid session token' }); return; }
-    if (!['/prepare-config', '/verify-config'].includes(route)) { reply(res, 404, { error: 'Not found' }); return; }
+    if (!['/prepare-config', '/submit-config', '/verify-config'].includes(route)) { reply(res, 404, { error: 'Not found' }); return; }
     if (busy) { reply(res, 409, { error: 'An operation is already running' }); return; }
     busy = true;
     try {
@@ -62,6 +66,10 @@ document.getElementById('createConfig').addEventListener('click',async()=>{
       if (route === '/prepare-config') {
         assert.equal(payload.wallet, plan.wallet, 'Wrong wallet');
         reply(res, 200, await prepare());
+      } else if (route === '/submit-config') {
+        assert.equal(typeof payload.transaction, 'string', 'Missing signed transaction');
+        assert.match(payload.transaction, /^[A-Za-z0-9+/]+={0,2}$/, 'Invalid transaction encoding');
+        reply(res, 200, await submit(payload.transaction));
       } else {
         assert.match(payload.signature, /^[1-9A-HJ-NP-Za-km-z]{80,90}$/, 'Invalid signature');
         reply(res, 200, await verify(payload.signature));
@@ -69,6 +77,67 @@ document.getElementById('createConfig').addEventListener('click',async()=>{
     } catch (error) { reply(res, 400, { error: error.message }); }
     finally { busy = false; }
   });
+}
+
+function encodeBase58(bytes) {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let value = BigInt('0x' + Buffer.from(bytes).toString('hex'));
+  let result = '';
+  while (value > 0n) { result = alphabet[Number(value % 58n)] + result; value /= 58n; }
+  for (const byte of bytes) { if (byte !== 0) break; result = '1' + result; }
+  return result;
+}
+
+// The browser returns only Phantom's signature. Validate the exact prepared message
+// and payer signature before the server adds the saved configuration signature.
+function validateWalletSignature(transaction, pending, wallet, config) {
+  const message = Buffer.from(transaction.message.serialize());
+  assert.ok(message.equals(pending.message), 'Signed transaction differs from prepared config');
+  const signers = transaction.message.staticAccountKeys.slice(0, transaction.message.header.numRequiredSignatures);
+  assert.equal(signers.length, 2, 'Unexpected signer count');
+  assert.equal(signers[0].toBase58(), wallet.toBase58(), 'Unexpected payer');
+  assert.equal(signers[1].toBase58(), config.toBase58(), 'Unexpected configuration signer');
+  assert.equal(transaction.signatures.length, 2, 'Unexpected signature count');
+  assert.ok(transaction.signatures[1].every(byte => byte === 0), 'Config must be unsigned before Phantom approval');
+  const publicKey = crypto.createPublicKey({ format: 'der', type: 'spki',
+    key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(wallet.toBytes())]) });
+  assert.ok(crypto.verify(null, message, publicKey, Buffer.from(transaction.signatures[0])), 'Invalid Phantom signature');
+}
+
+function createSubmitter({ web3, connection, wallet, configKeypair, getPending, receiptFile, verifyConfigAccount }) {
+  return async encoded => {
+    const pending = getPending();
+    assert.ok(pending && !pending.submissionAttempted, 'No pending transaction or submission already attempted; reconcile before retrying');
+    assert.ok(!fs.existsSync(receiptFile), 'A signature was already recorded; reconcile before retrying');
+    const bytes = Buffer.from(encoded, 'base64');
+    assert.ok(bytes.length <= 1232, 'Transaction exceeds size limit');
+    const transaction = web3.VersionedTransaction.deserialize(bytes);
+    validateWalletSignature(transaction, pending, wallet, configKeypair.publicKey);
+    assert.ok(!await verifyConfigAccount(), 'Config already exists; do not recreate it');
+    assert.ok((await connection.isBlockhashValid(pending.latest.blockhash, { commitment: 'confirmed' })).value,
+      'Transaction expired; stop and prepare again after reconciliation');
+    transaction.sign([configKeypair]);
+    const simulated = await connection.simulateTransaction(transaction, { sigVerify: true,
+      commitment: 'confirmed', accounts: { encoding: 'base64', addresses: [configKeypair.publicKey.toBase58()] } });
+    assert.equal(simulated.value.err, null, 'Fully signed config simulation failed');
+    const account = simulated.value.accounts?.[0];
+    assert.ok(account, 'Simulated config is missing');
+    assert.equal(account.owner, pending.account.owner, 'Unexpected simulated config owner');
+    assert.equal(account.data[0], pending.account.data[0], 'Simulated config differs from reviewed settings');
+    const fee = await connection.getFeeForMessage(transaction.message, 'confirmed');
+    assert.notEqual(fee.value, null, 'Fee unavailable');
+    const cost = account.lamports + fee.value;
+    assert.ok(cost <= 10000000, 'Config cost exceeds the approved 0.01 SOL ceiling');
+    assert.ok(await connection.getBalance(wallet, 'confirmed') >= cost, 'Insufficient SOL');
+    const signature = encodeBase58(transaction.signatures[0]);
+    // Persist the known signature BEFORE broadcast so interruptions cannot hide it.
+    fs.writeFileSync(receiptFile, JSON.stringify({ signature, status: 'submission-attempted',
+      config: configKeypair.publicKey.toBase58(), ...pending.latest }), { mode: 0o600, flag: 'wx' });
+    pending.submissionAttempted = true;
+    const sent = await connection.sendRawTransaction(transaction.serialize(), { skipPreflight: false, maxRetries: 3 });
+    assert.equal(sent, signature, 'RPC returned an unexpected signature; reconcile before retrying');
+    return { signature };
+  };
 }
 
 async function main() {
@@ -129,13 +198,17 @@ async function main() {
     const cost = account.lamports + fee.value;
     assert.ok(cost <= 10000000, 'Config cost exceeds the approved 0.01 SOL ceiling');
     assert.ok(await connection.getBalance(wallet, 'confirmed') >= cost, 'Insufficient SOL');
-    // Partial signing happens only in explicitly enabled mode, after the UI confirmation.
-    unsigned.sign([draft.config]);
-    pending = { latest, message: Buffer.from(message.serialize()) };
+    // Phantom must sign first; the configuration key is added only after validation.
+    pending = { latest, message: Buffer.from(message.serialize()), account, submissionAttempted: false };
     return { transaction: Buffer.from(unsigned.serialize()).toString('base64'), estimatedCostSOL: cost / 1e9 };
   };
+  const submit = createSubmitter({ web3, connection, wallet, configKeypair: draft.config,
+    getPending: () => pending, receiptFile, verifyConfigAccount });
   const verify = async signature => {
     assert.ok(pending, 'No prepared config transaction in this session');
+    assert.ok(pending.submissionAttempted, 'No submission was attempted');
+    const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+    assert.equal(signature, receipt.signature, 'Signature differs from recorded submission');
     fs.writeFileSync(receiptFile, JSON.stringify({ signature, status: 'pending', config: plan.draft.config }), { mode: 0o600 });
     const result = await connection.confirmTransaction({ signature, ...pending.latest }, 'confirmed');
     assert.equal(result.value.err, null, 'Config transaction failed on-chain');
@@ -147,7 +220,7 @@ async function main() {
       slot: transaction.slot }), { mode: 0o600 });
     return { signature, config: plan.draft.config, verified: true };
   };
-  const server = createConsole({ plan, enabled: enabled && !existing, renderPreview, prepare, verify,
+  const server = createConsole({ plan, enabled: enabled && !existing, renderPreview, prepare, submit, verify,
     browserJS: fs.readFileSync(browserFile), logoPath: path.join(root, 'logo-public.png') });
   server.on('error', error => { console.error('Config console stopped:', error.message); process.exitCode = 1; });
   server.listen(3000, '0.0.0.0', () => {
@@ -157,5 +230,6 @@ async function main() {
   });
 }
 
-module.exports = { createConsole };
+module.exports = { createConsole, createSubmitter, validateWalletSignature, encodeBase58 };
 if (!module.parent) main().catch(error => { console.error('Config console stopped:', error.message); process.exitCode = 1; });
+
