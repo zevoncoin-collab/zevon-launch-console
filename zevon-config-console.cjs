@@ -148,7 +148,7 @@ async function main() {
     return { signature, config: plan.draft.config, verified: true };
   };
   const server = createConsole({ plan, enabled: enabled && !existing, renderPreview, prepare, verify,
-    browserJS: fs.readFileSync(browserFile), logoPath: path.join(root, 'logo.png') });
+    browserJS: fs.readFileSync(browserFile), logoPath: path.join(root, 'logo-public.png') });
   server.on('error', error => { console.error('Config console stopped:', error.message); process.exitCode = 1; });
   server.listen(3000, '0.0.0.0', () => {
     console.log('ZEVON config console running on port 3000. Keep the port Private.');

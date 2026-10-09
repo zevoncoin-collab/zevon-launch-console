@@ -83,7 +83,7 @@ dl{margin:0}dt{font-size:13px;color:#a5aecb;margin-top:18px}dt:first-child{margi
 #walletStatus{overflow-wrap:anywhere;min-height:50px}.success{color:#9ce8c0}.mismatch{color:#ffc091}
 .note{font-size:13px}footer{margin-top:24px;font-size:13px;color:#9da8c8}@media(max-width:620px){.grid{grid-template-columns:1fr}body{padding:20px 14px}header{gap:12px}img{width:75px;height:75px}h1{font-size:27px}.card{padding:20px}}
 </style></head><body><main>
-<header><img src="/logo.png" alt="Original ZEVON logo"><div><div class="badge">Launch preview · Mainnet plan</div><h1>ZEVON <small>($ZEVON)</small></h1><p>Autonomous Intelligence, Evolved.</p></div></header>
+<header><img src="/logo.png" alt="ZEVON logo without ticker"><div><div class="badge">Launch preview · Mainnet plan</div><h1>ZEVON</h1><p>Autonomous Intelligence, Evolved.</p></div></header>
 <div class="grid"><section class="card"><h2>Token and first buy</h2><dl>
 <dt>Supply</dt><dd id="supply"></dd><dt>Initial buy</dt><dd class="big">1 SOL</dd><dt>Quoted tokens received</dt><dd class="big" id="tokens"></dd><dt>Authorities after creation</dt><dd>Mint: removed · Freeze: removed<br>Metadata: immutable</dd></dl></section>
 <section class="card"><h2>Estimated cost</h2><dl><dt>Total, including buy, rent, and both network fees</dt><dd class="big" id="total"></dd><dt>Wallet balance at preview creation</dt><dd id="balance"></dd><dt>Estimated remaining balance</dt><dd id="remaining"></dd></dl><p class="note">These are estimates from the successful rehearsal and current config rent. Final transactions need fresh fee and balance checks.</p></section>
@@ -133,7 +133,7 @@ function createServer(plan, logoPath) {
 
 async function main() {
   const plan = await buildSummary();
-  const server = createServer(plan, process.cwd() + '/logo.png');
+  const server = createServer(plan, process.cwd() + '/logo-public.png');
   server.on('error', error => { console.error('Preview server stopped:', error.message); process.exitCode = 1; });
   server.listen(3000, '0.0.0.0', () => {
     console.log('ZEVON read-only launch preview is running on port 3000.');
