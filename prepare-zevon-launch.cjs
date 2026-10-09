@@ -43,11 +43,7 @@ function loadOrCreateDraft(root, wallet, fingerprint, Keypair) {
     mint: Keypair.fromSecretKey(Uint8Array.from(record.mint)) };
 }
 
-async function main() {
-  const web3 = require('@solana/web3.js');
-  const sdk = require('@meteora-ag/dynamic-bonding-curve-sdk');
-  const { buildPlan } = require(process.cwd() + '/check-zevon-plan.cjs');
-  const { params, reference, connection, program, BN, wallet } = buildPlan();
+function getPlanFingerprint(params, wallet, BN) {
   const normalize = value => {
     if (BN.isBN(value)) return value.toString();
     if (Array.isArray(value)) return value.map(normalize);
@@ -55,9 +51,17 @@ async function main() {
       Object.entries(value).map(([key, item]) => [key, normalize(item)]));
     return value;
   };
-  const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ params: normalize(params),
-    wallet: wallet.toBase58(), name: 'ZEVON', symbol: 'ZEVON', uri: URI,
+  return crypto.createHash('sha256').update(JSON.stringify({ params: normalize(params),
+    wallet, name: 'ZEVON', symbol: 'ZEVON', uri: URI,
     buyLamports: '1000000000', minimumOutput: '31438793605717' })).digest('hex');
+}
+
+async function main() {
+  const web3 = require('@solana/web3.js');
+  const sdk = require('@meteora-ag/dynamic-bonding-curve-sdk');
+  const { buildPlan } = require(process.cwd() + '/check-zevon-plan.cjs');
+  const { params, reference, connection, program, BN, wallet } = buildPlan();
+  const fingerprint = getPlanFingerprint(params, wallet.toBase58(), BN);
   const draft = loadOrCreateDraft(process.cwd(), wallet.toBase58(), fingerprint, web3.Keypair);
   const config = draft.config.publicKey;
   const mint = draft.mint.publicKey;
@@ -126,5 +130,5 @@ async function main() {
   console.log('No signing or submission. Keep the private state folder in your Codespace; do not upload it.');
 }
 
-module.exports = { loadOrCreateDraft };
+module.exports = { loadOrCreateDraft, getPlanFingerprint };
 if (!module.parent) main().catch(error => { console.error('Draft preparation stopped:', error.message); process.exitCode = 1; });
