@@ -30,7 +30,7 @@ async function buildSummary() {
     const digits = value.toString().padStart(places + 1, '0');
     return digits.slice(0, -places) + '.' + digits.slice(-places);
   };
-  return { name: 'ZEVON', symbol: 'ZEVON', wallet: wallet.toBase58(),
+  const summary = { name: 'ZEVON', symbol: 'ZEVON', wallet: wallet.toBase58(),
     supply: '1,000,000,000', decimals: c.tokenDecimal, buySOL: '1',
     expectedTokens: '31,438,793.605717', minimumOutputRaw: quote.outputAmount.toString(),
     bondingFeePercent: Number(c.poolFees.baseFee.cliffFeeNumerator.toString()) / 10000000,
@@ -42,6 +42,28 @@ async function buildSummary() {
     estimatedTotalSOL: decimal(estimatedTotal, 9), balanceSOL: decimal(balance, 9),
     estimatedRemainingSOL: balance >= estimatedTotal ? decimal(balance - estimatedTotal, 9) : 'Insufficient balance',
     builtAt: new Date().toISOString(), mode: 'preview-only' };
+  const reviewFile = process.cwd() + '/.zevon-launch-state/review.json';
+  if (fs.existsSync(reviewFile)) {
+    // Read only the public review file, never the private keys file.
+    const review = JSON.parse(fs.readFileSync(reviewFile, 'utf8'));
+    const { PublicKey } = require('@solana/web3.js');
+    assert.equal(review.version, 1);
+    assert.equal(review.mode, 'unsigned-draft');
+    assert.equal(review.wallet, summary.wallet);
+    assert.equal(review.metadataURI, summary.metadataURI);
+    assert.equal(review.buyLamports, '1000000000');
+    assert.equal(review.minimumOutputRaw, summary.minimumOutputRaw);
+    const mint = new PublicKey(review.mint);
+    const config = new PublicKey(review.config);
+    assert.equal(sdk.deriveDbcPoolAddress(c.quoteMint, mint, config).toBase58(), review.pool);
+    assert.ok(Number.isSafeInteger(review.configSimulationSlot) && review.configSimulationSlot > 0);
+    assert.ok(Array.isArray(review.transactions) && review.transactions.length === 2);
+    summary.draft = { mint: mint.toBase58(), config: config.toBase58(), pool: review.pool,
+      configSimulationSlot: review.configSimulationSlot, preparedAt: review.builtAt,
+      transactions: review.transactions.map(tx => ({ bytes: tx.bytes,
+        computeBudget: tx.computeBudget, feeLamports: tx.feeLamports })) };
+  }
+  return summary;
 }
 
 function renderPreview(plan, nonce) {
@@ -68,7 +90,11 @@ dl{margin:0}dt{font-size:13px;color:#a5aecb;margin-top:18px}dt:first-child{margi
 <section class="card"><h2>Bonding and migration</h2><dl><dt>Route</dt><dd>Meteora DBC → DAMM v2</dd><dt>Bonding trading fee</dt><dd id="fee"></dd><dt>Creator share of trading fees</dt><dd id="creatorFee"></dd><dt>Permanently locked LP split</dt><dd id="locked"></dd><dt>Migration quote threshold</dt><dd id="threshold"></dd></dl></section>
 <section class="card"><h2>Two transactions</h2><p>1. Create your ZEVON config.<br>2. Create the pool and make the 1 SOL buy together.</p><p class="note">The copied config passed mainnet simulation. Pool and buy passed a rehearsal with the matching AUTON reference config. The unsigned ZEVON transaction pair passed size and signer checks. The pool using your new config has not yet been simulated against live state.</p></section>
 <section class="card wide"><h2>Your original creator wallet</h2><p>Creator, payer, fee claimer, and leftover receiver:</p><p id="expectedWallet"></p><button id="connect" type="button">Connect Phantom for address check</button><p id="walletStatus" aria-live="polite">No wallet connected. This page can only request your public address.</p><p class="note">This preview has no signing or launch controls. Connecting does not create a token or spend SOL.</p></section>
-<section class="card wide"><h2>Published metadata</h2><p id="uri"></p><p class="note">Original logo preserved. Final mint and config addresses will be shown in a separate transaction review.</p></section></div>
+<section class="card wide" id="draftCard"><h2>Prepared ZEVON draft addresses</h2><dl>
+<dt>Token mint</dt><dd id="draftMint"></dd><dt>Config</dt><dd id="draftConfig"></dd><dt>Pool</dt><dd id="draftPool"></dd>
+<dt>Exact config simulation</dt><dd id="draftSlot"></dd><dt>Unsigned transaction sizes</dt><dd id="draftSizes"></dd></dl>
+<p class="note">These addresses are saved in your Codespace for the launch review. They are not yet created on-chain. Pool creation using this new config still needs a live-state simulation after config creation. No launch controls are enabled here.</p></section>
+<section class="card wide"><h2>Published metadata</h2><p id="uri"></p><p class="note">Original logo preserved.</p></section></div>
 <footer id="timestamp"></footer></main>
 <script nonce="${nonce}">
 'use strict';const plan=${json};
@@ -78,6 +104,7 @@ text('total',plan.estimatedTotalSOL+' SOL');text('balance',plan.balanceSOL+' SOL
 text('fee',plan.bondingFeePercent+'%');text('creatorFee',plan.creatorTradingFeePercentage+'%');
 text('locked',plan.creatorLockedLP+'% creator / '+plan.partnerLockedLP+'% partner');text('threshold',plan.migrationThresholdSOL+' SOL');
 text('expectedWallet',plan.wallet);text('uri',plan.metadataURI);text('timestamp','Preview created '+new Date(plan.builtAt).toLocaleString());
+if(plan.draft){text('draftMint',plan.draft.mint);text('draftConfig',plan.draft.config);text('draftPool',plan.draft.pool);text('draftSlot','Passed at slot '+plan.draft.configSimulationSlot);text('draftSizes','Config: '+plan.draft.transactions[0].bytes+' bytes · Pool and buy: '+plan.draft.transactions[1].bytes+' bytes');}else{el('draftCard').hidden=true;}
 const status=publicKey=>{const address=publicKey?publicKey.toString():null;el('walletStatus').className=address===plan.wallet?'success':address?'mismatch':'';text('walletStatus',!address?'Wallet disconnected.':address===plan.wallet?'Confirmed: your original ZEVON wallet is connected.':'Different wallet connected: '+address+'. Select your original ZEVON wallet in Phantom.');};
 const provider=window.phantom&&window.phantom.solana;
 if(provider&&provider.isPhantom){provider.on('accountChanged',status);provider.on('disconnect',()=>status(null));}
