@@ -1,0 +1,16 @@
+'use strict';
+const {test}=require('node:test');const assert=require('node:assert/strict');const crypto=require('node:crypto');const vm=require('node:vm');const w=require('@solana/web3.js');const {A,validateInstructions,validateSigned,html,base58}=require('./zevon-fees.cjs');
+const pk=x=>new w.PublicKey(x),key=x=>({pubkey:pk(x),isSigner:x===A.wallet,isWritable:true});
+const ata=m=>w.PublicKey.findProgramAddressSync([pk(A.wallet).toBuffer(),pk(A.token).toBuffer(),pk(m).toBuffer()],pk(A.ata))[0].toString();
+function fixture(role='creator'){
+ const mk=(program,keys,data)=>new w.TransactionInstruction({programId:pk(program),keys:keys.map(key),data});
+ const base=ata(A.mint),quote=ata(A.sol),event=w.PublicKey.findProgramAddressSync([Buffer.from('__event_authority')],pk(A.program))[0].toString();
+ const data=Buffer.alloc(24);crypto.createHash('sha256').update('global:'+(role==='creator'?'claim_creator_trading_fee':'claim_trading_fee')).digest().copy(data,0,0,8);data.writeBigUInt64LE(1000000000n,16);
+ return [mk(A.ata,[A.wallet,base,A.wallet,A.mint,w.SystemProgram.programId.toString(),A.token],Buffer.from([1])),mk(A.ata,[A.wallet,quote,A.wallet,A.sol,w.SystemProgram.programId.toString(),A.token],Buffer.from([1])),mk(A.program,[A.authority,...(role==='partner'?[A.config]:[]),A.pool,base,quote,A.baseVault,A.quoteVault,A.mint,A.sol,A.wallet,A.token,A.token,event,A.program],data),mk(A.token,[quote,A.wallet,A.wallet],Buffer.from([9]))];
+}
+test('accepts only the reviewed creator and partner instruction layouts',()=>{for(const role of ['creator','partner'])validateInstructions(fixture(role),role,'1000000000');});
+test('rejects diverted SOL recipient',()=>{const f=fixture();f[3].keys[1].pubkey=pk(A.pool);assert.throws(()=>validateInstructions(f,'creator','1000000000'));});
+test('rejects altered amount, other program, and extra instruction',()=>{let f=fixture();f[2].data.writeBigUInt64LE(9n,16);assert.throws(()=>validateInstructions(f,'creator','1000000000'));f=fixture();f[2].programId=w.SystemProgram.programId;assert.throws(()=>validateInstructions(f,'creator','1000000000'));f=fixture();f.push(f[0]);assert.throws(()=>validateInstructions(f,'creator','1000000000'));});
+test('rejects wallet message replacement and unsigned claims',()=>{const tx=new w.VersionedTransaction(new w.TransactionMessage({payerKey:pk(A.wallet),recentBlockhash:pk(A.pool).toString(),instructions:fixture()}).compileToV0Message());assert.throws(()=>validateSigned(tx,{message:Buffer.from('different')}),/differs/);assert.throws(()=>validateSigned(tx,{message:Buffer.from(tx.message.serialize())}),/Invalid Phantom signature/);});
+test('browser code parses and exposes no automatic sign call on load',()=>{const page=html('test-session','test-nonce');const scripts=[...page.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];for(const s of scripts)new vm.Script(s[1]);assert.ok(page.includes("el('approve').onclick"));assert.ok(page.includes('Approve this claim in Phantom'));});
+test('base58 matches known public key',()=>assert.equal(base58(pk(A.wallet).toBytes()),A.wallet));
