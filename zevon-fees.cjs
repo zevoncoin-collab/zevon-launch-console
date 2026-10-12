@@ -18,7 +18,8 @@ const A = {
  quoteVault:'ArKDe2imc6BZTWECy9PcTPXBo3UaTYDCAdCQ2ySMCJJ3',
  sol:'So11111111111111111111111111111111111111112',
  token:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
- ata:'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+ ata:'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+ lighthouse:'L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95'
 };
 const pk = s => new w.PublicKey(s);
 const sol = n => (Number(n)/1e9).toFixed(9);
@@ -67,13 +68,49 @@ function computeInstructions() {
  // 200,000 CU * 10,000 micro-lamports = 2,000 lamports (0.000002 SOL).
  return [w.ComputeBudgetProgram.setComputeUnitLimit({units:200000}),w.ComputeBudgetProgram.setComputeUnitPrice({microLamports:10000})];
 }
+function validateMessage(message,pending) {
+ const original=w.VersionedMessage.deserialize(pending.message);
+ assert.equal(message.version,0,'Unexpected transaction format');
+ assert.equal(original.version,0);
+ assert.equal(message.addressTableLookups.length,0,'Lookup tables are not permitted');
+ assert.equal(message.recentBlockhash,original.recentBlockhash,'Preview expired or blockhash changed. Preview again.');
+ const before=w.TransactionMessage.decompile(original),after=w.TransactionMessage.decompile(message);
+ assert.equal(after.payerKey.toString(),A.wallet,'Unexpected payer');
+ const entry=ix=>({program:ix.programId.toString(),data:ix.data.toString('hex'),keys:ix.keys.map(k=>[k.pubkey.toString(),k.isSigner,k.isWritable])});
+ assert.ok(after.instructions.length>=before.instructions.length&&after.instructions.length<=before.instructions.length+2,'Unexpected added instructions');
+ for(let i=0;i<before.instructions.length;i++)assert.deepEqual(entry(after.instructions[i]),entry(before.instructions[i]),'Reviewed claim instruction changed: '+i);
+ // Preserve all original account privileges; the sole optional new key is the
+ // read-only Lighthouse program. No added signer, recipient, or writable key.
+ const known=new Map(original.staticAccountKeys.map((key,i)=>[key.toString(),{signer:original.isAccountSigner(i),writable:original.isAccountWritable(i)}]));
+ const seen=new Set();
+ message.staticAccountKeys.forEach((key,i)=>{
+  const id=key.toString();assert.ok(!seen.has(id),'Duplicate account key');seen.add(id);
+  const expected=known.get(id)||{signer:false,writable:false};
+  assert.ok(known.has(id)||id===A.lighthouse,'Unexpected extra account');
+  assert.equal(message.isAccountSigner(i),expected.signer,'Account signer changed');
+  assert.equal(message.isAccountWritable(i),expected.writable,'Account permissions changed');
+ });
+ for(const id of known.keys())assert.ok(seen.has(id),'Original account missing');
+ const tags=new Set();
+ for(const ix of after.instructions.slice(before.instructions.length)) {
+  assert.equal(ix.programId.toString(),A.lighthouse,'Unrecognized appended program');
+  assert.equal(ix.keys.length,1,'Unexpected Lighthouse account count');
+  assert.ok(ix.data.length>=3&&ix.data.length<=512,'Invalid Lighthouse data');
+  const tag=ix.data[0];assert.ok([6,10].includes(tag)&&!tags.has(tag),'Only account-info and token-account assertions are permitted');tags.add(tag);
+  // Lighthouse enum 6 = AssertAccountInfoMulti; 10 = AssertTokenAccountMulti.
+  // Source: Jac0xb/lighthouse programs/lighthouse/src/instruction.rs and the
+  // assert_target_account/assert_token_account processors: evaluation only, no CPI.
+  assert.equal(ix.keys[0].pubkey.toString(),tag===6?A.wallet:baseATA.toString(),'Unexpected assertion target');
+ }
+ assert.equal(message.header.numRequiredSignatures,1);
+}
 function validateSigned(tx,pending) {
- assert.ok(Buffer.from(tx.message.serialize()).equals(pending.message),'Claim was NOT submitted. Phantom changed the prepared message: '+messageDifference(pending.message,tx.message));
+ validateMessage(tx.message,pending);
  assert.equal(tx.message.header.numRequiredSignatures,1);
  assert.equal(tx.message.staticAccountKeys[0].toString(),A.wallet);
  assert.equal(tx.signatures.length,1);
  const publicKey=crypto.createPublicKey({format:'der',type:'spki',key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),pk(A.wallet).toBuffer()])});
- assert.ok(crypto.verify(null,pending.message,publicKey,Buffer.from(tx.signatures[0])),'Invalid Phantom signature');
+ assert.ok(crypto.verify(null,Buffer.from(tx.message.serialize()),publicKey,Buffer.from(tx.signatures[0])),'Invalid Phantom signature');
 }
 function base58(bytes) {
  const alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';let n=BigInt('0x'+Buffer.from(bytes).toString('hex')),s='';
@@ -134,10 +171,12 @@ async function engine() {
   const bytes=Buffer.from(encoded,'base64');assert.ok(bytes.length<=1232);
   const tx=w.VersionedTransaction.deserialize(bytes);validateSigned(tx,pending);
   assert.ok((await connection.isBlockhashValid(pending.latest.blockhash,'confirmed')).value,'Preview expired. Refresh and prepare again.');
+  const finalFee=(await connection.getFeeForMessage(tx.message,'confirmed')).value;
+  assert.ok(finalFee!==null&&finalFee<=100000,'Final network fee exceeds 0.0001 SOL or is unavailable');
   await simulate(tx,true);
   const signature=base58(tx.signatures[0]);
   fs.mkdirSync(folder,{recursive:true,mode:0o700});
-  fs.writeFileSync(path.join(folder,signature+'.json'),JSON.stringify({signature,role:pending.role,amount:pending.amount,status:'submission-attempted',message:pending.message.toString('base64'),...pending.latest},null,2),{flag:'wx',mode:0o600});
+  fs.writeFileSync(path.join(folder,signature+'.json'),JSON.stringify({signature,role:pending.role,amount:pending.amount,status:'submission-attempted',message:Buffer.from(tx.message.serialize()).toString('base64'),...pending.latest},null,2),{flag:'wx',mode:0o600});
   pending.submitted=true;pending.signature=signature;
   try {const sent=await connection.sendRawTransaction(tx.serialize(),{skipPreflight:false,maxRetries:3});assert.equal(sent,signature);}catch(e){return {signature,notice:'Submission outcome uncertain. Check this signature; do not repeat the claim. '+e.message};}
   return {signature};
@@ -191,5 +230,5 @@ async function main() {
  });
  server.listen(3001,'0.0.0.0',()=>console.log('ZEVON fee claims ready on port 3001. Keep the Codespaces port Private. Open it in your browser. Each claim requires Phantom approval.'));
 }
-module.exports={A,validateInstructions,validateSigned,messageDifference,computeInstructions,base58,html};
+module.exports={A,validateInstructions,validateSigned,validateMessage,messageDifference,computeInstructions,base58,html};
 if(require.main===module)main().catch(e=>{console.error(e.message);process.exitCode=1;});
