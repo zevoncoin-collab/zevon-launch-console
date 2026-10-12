@@ -31,6 +31,6 @@ node zevon-fees.cjs --simulate
 node --test zevon-fees.test.cjs
 ```
 
-`--simulate` constructs unsigned transactions and simulates them without broadcasting. The screen validates all instruction accounts and exact fee amounts, requires the original wallet, checks the signed message and signature, re-simulates before submission, and records the transaction signature before broadcasting. Wallet keys are never read or stored by this tool.
+`--simulate` constructs unsigned transactions and simulates them without broadcasting. The screen validates all original instruction accounts, privileges, and exact fee amounts, requires the original wallet, and checks the signature over the complete returned message. It permits only appended Lighthouse account-info and token-account assertions targeting this wallet and its ZEVON token account. Other additions, instruction changes, new recipient accounts, and permission changes are rejected. The complete signed transaction is simulated again before submission, and its signature and full message are recorded before broadcasting. Wallet keys are never read or stored by this tool.
 
 As of October 11, 2026, 10:04 PM Central: 1.079818335 SOL creator fees plus 1.079818394 SOL partner fees were unclaimed. The pool had not graduated; pool-creation and configured migration fees were zero. Refresh before signing; these amounts can change.
