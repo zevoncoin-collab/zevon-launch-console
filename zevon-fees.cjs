@@ -45,8 +45,30 @@ function validateInstructions(instructions,role,amount) {
  assert.deepEqual(close.keys.map(k=>k.pubkey.toString()),[quoteATA.toString(),A.wallet,A.wallet],'Wrong SOL recipient');
  for(const ix of instructions) for(const key of ix.keys) if(key.isSigner) assert.equal(key.pubkey.toString(),A.wallet,'Unexpected signer');
 }
+function messageDifference(beforeBytes,afterMessage) {
+ try {
+  const before=w.VersionedMessage.deserialize(beforeBytes);
+  const a=w.TransactionMessage.decompile(before),b=w.TransactionMessage.decompile(afterMessage);
+  const changes=[];
+  if(before.version!==afterMessage.version)changes.push('transaction format changed');
+  if(a.recentBlockhash!==b.recentBlockhash)changes.push('blockhash changed');
+  if(!a.payerKey.equals(b.payerKey))changes.push('payer changed');
+  const item=ix=>JSON.stringify({program:ix.programId.toString(),data:ix.data.toString('hex'),keys:ix.keys.map(k=>[k.pubkey.toString(),k.isSigner,k.isWritable])});
+  if(a.instructions.length!==b.instructions.length)changes.push('instruction count '+a.instructions.length+' -> '+b.instructions.length);
+  for(let i=0;i<Math.max(a.instructions.length,b.instructions.length);i++){
+   const x=a.instructions[i],y=b.instructions[i];
+   if(!x||!y||item(x)!==item(y))changes.push('instruction '+i+': '+(x?x.programId.toString()+' data='+x.data.toString('hex'):'none')+' -> '+(y?y.programId.toString()+' data='+y.data.toString('hex'):'none'));
+  }
+  return changes.join('; ')||'account encoding changed';
+ }catch{return 'message could not be compared';}
+}
+function computeInstructions() {
+ // Fix both settings before preview so wallets need not add a priority fee.
+ // 200,000 CU * 10,000 micro-lamports = 2,000 lamports (0.000002 SOL).
+ return [w.ComputeBudgetProgram.setComputeUnitLimit({units:200000}),w.ComputeBudgetProgram.setComputeUnitPrice({microLamports:10000})];
+}
 function validateSigned(tx,pending) {
- assert.ok(Buffer.from(tx.message.serialize()).equals(pending.message),'Transaction differs from reviewed claim');
+ assert.ok(Buffer.from(tx.message.serialize()).equals(pending.message),'Claim was NOT submitted. Phantom changed the prepared message: '+messageDifference(pending.message,tx.message));
  assert.equal(tx.message.header.numRequiredSignatures,1);
  assert.equal(tx.message.staticAccountKeys[0].toString(),A.wallet);
  assert.equal(tx.signatures.length,1);
@@ -99,7 +121,7 @@ async function engine() {
   const tx=role==='creator'?await client.creator.claimCreatorTradingFee({...params,creator:pk(A.wallet)}):await client.partner.claimPartnerTradingFee({...params,feeClaimer:pk(A.wallet)});
   validateInstructions(tx.instructions,role,amount.toString());
   const latest=await connection.getLatestBlockhash('confirmed');
-  const message=new w.TransactionMessage({payerKey:pk(A.wallet),recentBlockhash:latest.blockhash,instructions:[w.ComputeBudgetProgram.setComputeUnitLimit({units:200000}),...tx.instructions]}).compileToV0Message();
+  const message=new w.TransactionMessage({payerKey:pk(A.wallet),recentBlockhash:latest.blockhash,instructions:[...computeInstructions(),...tx.instructions]}).compileToV0Message();
   assert.equal(message.header.numRequiredSignatures,1);assert.equal(message.staticAccountKeys[0].toString(),A.wallet);
   const unsigned=new w.VersionedTransaction(message);assert.ok(unsigned.serialize().length<=1232);
   const fee=(await connection.getFeeForMessage(message,'confirmed')).value;assert.ok(fee!==null&&fee<=100000,'Network fee unavailable or exceeds 0.0001 SOL');
@@ -169,5 +191,5 @@ async function main() {
  });
  server.listen(3001,'0.0.0.0',()=>console.log('ZEVON fee claims ready on port 3001. Keep the Codespaces port Private. Open it in your browser. Each claim requires Phantom approval.'));
 }
-module.exports={A,validateInstructions,validateSigned,base58,html};
+module.exports={A,validateInstructions,validateSigned,messageDifference,computeInstructions,base58,html};
 if(require.main===module)main().catch(e=>{console.error(e.message);process.exitCode=1;});
